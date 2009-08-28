@@ -1,0 +1,119 @@
+Hashy
+
+This is intended to be a globally accessable key->value service.
+It can be used for storing small amounts of any data.
+All access is meant to be done using standard HTTP methods.
+
+This implementation is meant to be multi-user.
+In that case the root level is always user.
+
+So, for example, if the user 'test' wants to store the read status of some RSS feed, they'd do this:
+curl -X PUT -d '1' 'hashy.info/test/rss/item/UrlOfFeed/UrlOfItem/read'
+And to get that data out again, perhaps from another feed reader on another computer:
+curl 'hashy.info/test/rss/item/UrlOfFeed/UrlOfItem/read'
+Which would return '1'
+
+If test had only the values:
+/test/pictures => 3
+/test/pictures/1/url => http://photo.com/1132
+/test/pictures/1/new => 1
+/test/pictures/2/url => httpL//photo.com/1133
+/test/pictures/2/new => 0
+/test/pictures/2/name => Sleeping Among The Flowers
+/test/pictures/3/url => http://photo2.com/09
+/test/pictures/3/data => {new: 0;name: "The Dance";geo: [123, 241];camera: "Blah Blah";}
+
+Then:
+'GET /test/pictures' would return '3'
+'GET /test/pictures/' would return '1\n2\n3' (In the actual returned value the '\n's would be literal newlines)
+'GET /test' would return ''
+'GET /test/' would return 'pictures'
+'GET /test/pictures/1' would return ''
+'GET /test/pictures/1/url' would return 'http://photo.com/1132'
+'GET /test/pictures/1/url/blah' would return ''
+
+It should be pointed out that besides values that the system uses for interal purposes the system doesn't care what it stores.
+It does not interpret values at any point, nor does it enforce any kind of structure.
+It's up to the application using the system to define the structure and know what various datum do.
+Also, to be clear, the '/test/pictures' being set to '3' was something the application would have done itself.
+That was not automatic. It could easilly be set to 'weknankjfewlkjfnfew' and the system would not be effected.
+Since the data is all arbitrary, the application should probably try to not be effected when it's data becomes corrupted like that either.
+
+It should also be pointed out that the content-type of all returned content is 'text/plain'
+
+
+Authentication
+
+Hashy uses only oAuth for authentication.
+In most cases this will require using oauthsign or some other application to generate your requests.
+
+The keys all have access control of sorts.
+curl -X POST -d 'read=1&write=0' 'hashy.info/test/rss/'
+(Only works if authenticated, but I'm leaving that out here because it's prettier)
+This sets whether or not the key can be read or set without requiring authentication
+In this case, anyone can read the value of 'hashy.info/test/rss', but only a client authenticated by user 'test' can edit that value.
+
+
+Registration
+
+The first time, you need to make an account.
+That's done by doing the following:
+curl -X POST -d 'email=your@email.address' 'hashy.info/yourNewAccountName'
+
+So, for example, to register the 'test' user (Assuming it isn't already in use)
+curl -X POST -d 'email=test@example.com' 'hashy.info/test'
+
+The system will then email out an access token for a client with a blank consumer token and secret.
+These are your root credentials, in place of a password.
+The first thing you should do with these is to associate your client of choice with your account.
+
+Basically, though, at this point you have fully access to your hash space.
+
+
+Associating New Clients
+
+In order to use your account it's generally recommended that any code which uses your account to be a registered client.
+For example, if you're using Hashy as a backend to keep your RSS feeds in sync then the plugins for each RSS reader is probably a separate client.
+
+Basically, how this works is the client signs a request and goes to '/yourAccountName/oauth/request'
+This will return the request token.
+It will also make a value (Overwritting any previous entry at that position) of '/yourAccountName/oauth/clients/ClientName' with the value of 0.
+You then, using any already authenticated client, set that value to 1.
+This will authenticate that client to access your account.
+Then, that client needs to go to '/yourAccountName/oauth/access' with their request tokens to get a set of access tokens.
+
+To revoke a client's access to your account you can either set '/yourAccountName/oauth/clients/ClientName' to be '0' again, or delete the entire key / dir.
+
+The element of '/yourAccountName/oauth/clients/ClientName/' will be read only, and contain whatever meta-data that the developer of the client chose to include.
+This space will not count towards your total limit, as it's only mirroring the data stored in his account space.
+
+
+Registering New Clients
+
+This part is for client developers.
+In order to use a client with Hashy, it needs to be previously registered.
+In order to do this, you must have a Hashy account.
+You then make an entry '/yourAccountName/oauth/dev/ClientName' 
+This will auto-populate '/yourAccountName/oauth/dev/ClientName/consumerToken' and '/yourAccountName/oauth/dev/ClientName/consumerSecret'
+Also, any meta-data you want to store about your client can be set here. Recommended values would be 'ClientName/description' and 'ClientName/url' or 'ClientName/email' for feedback.
+This data will be mirrored in the '.../oauth/clients/ClientName/' of anyone who's authorized the client with their account.
+At this point I'm thinking that '/yourAccountName/oauth/dev' would be magic, and would be synced among all people, so accessing '/yourAccountName/oauth/dev/' would list all registered clients in the system.
+All the meta-data, except the consumerSecret, would be readable by anyone, but only writable by the account that created it.
+Therefore, if a client called 'ClientName' already exists in the system (And isn't yours), then this will return 403, and you should pick a different name for your client.
+
+
+Limits
+
+The limits will be configurable, but in this instance they will be thus:
+No individual key can be greater than 255 characters. (Probably UTF at some point)
+The total size of all stored data can be no greater than 3Mb.
+
+The limits are read-only, and are stored in.
+/limits/individual
+/limits/total
+Probably in bytes.
+And your total usage is storred readonly in '/yourAccountName/usage'
+Probably in bytes also.
+Oh, or, it could be '/yourAccountName/usage/bytes', /yourAccountName/usage/megabytes', '/yourAccountName/usage/percentage'
+Maybe '/yourAccountName/usage' would have bytes, and '.../megabytes' and '.../percentage' would be included for convenience.
+I don't know yet.
